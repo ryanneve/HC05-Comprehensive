@@ -1,31 +1,8 @@
-/* **********************************************************
- * Disk91_HC05 library Header
- * **********************************************************
- * This source is under GNU GPL
- * Any information : contact me on www.disk91.com
- * ----------------------------------------------------------
- * Libary size with debug elements about 13Kb w/o debug : 10 Kb
- * To setup the library, please configure the following #define
- * DEBUG => when set by #define DEBUG - activate logs
- * blueToothSerial => link the HC05 with the arduino Serial port choosen.
- * **********************************************************
- * THE disk91_HC05 SOFTWARE IS PROVIDED TO YOU "AS IS," AND WE MAKE NO EXPRESS
- * OR IMPLIED WARRANTIES WHATSOEVER WITH RESPECT TO ITS FUNCTIONALITY, OPERABILITY,
- * OR USE, INCLUDING, WITHOUT LIMITATION, ANY IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR INFRINGEMENT.
- * WE EXPRESSLY DISCLAIM ANY LIABILITY WHATSOEVER FOR ANY DIRECT, INDIRECT,
- * CONSEQUENTIAL, INCIDENTAL OR SPECIAL DAMAGES, INCLUDING, WITHOUT LIMITATION,
- * LOST REVENUES, LOST PROFITS, LOSSES RESULTING FROM BUSINESS INTERRUPTION OR
- * LOSS OF DATA, REGARDLESS OF THE FORM OF ACTION OR LEGAL THEORY UNDER WHICH
- * THE LIABILITY MAY BE ASSERTED, EVEN IF ADVISED OF THE POSSIBILITY OR LIKELIHOOD
- * OF SUCH DAMAGES.
- * **********************************************************
- */
-#include "Arduino.h" 
+#include <Arduino.h>
 #ifndef _HC05C_H_
 #define _HC05C_H_
 
-#define DEBUG
+#define BT_DEBUG
 
 /* ======================================================================
  * Configuration
@@ -51,7 +28,7 @@
  * Helper and constants
  * ======================================================================
  */
-#ifdef DEBUG
+#ifdef BT_DEBUG
   #define print_debug(x) Serial.print("Debug :");Serial.println(x);
   #define print_debug2(x,y) Serial.print("Debug :");Serial.print(x);Serial.println(y);
 #else 
@@ -76,65 +53,41 @@
 #define BUFSZ 50
 
  
- class HC05c
- {
-   public:
-
-       /* -------------------------------------------------------------
-        * Construction
-        * -------------------------------------------------------------
-        */
-       HC05c();
-
-       /* -------------------------------------------------------------
-        * Configure the bluetooth device
-        * --------------------------------------------------------------
-        */
-       boolean setupBlueToothConnection(char *);
-
-       /* -------------------------------------------------------------
-        * Establsh connection to a device. return only when the connection
-        * has been done with true
-        * --------------------------------------------------------------
-        */
-       boolean connect();
-       
-       /* ---------------------------------------------------------------
-        * Receive string from bluetooth - not blocking operation
-        * return number of char received
-        * return -1 when the connection is broken
-        * ---------------------------------------------------------------
-        */
-       int receive(char *,int);
-       
-       /* ---------------------------------------------------------------
-        * Send string over bluetooth - blocking operation
-        * return false if disconnected
-        * ---------------------------------------------------------------
-        */
-       boolean send(char *);
-   
+class HC05c
+{
+	public:
+		HC05c();
+		//Configure the bluetooth device
+		bool	setupConnection(char * devName);
+		bool	setupConnection(char * devName, char * passwd);
+		//Establsh connection to a device. return only when the connection
+		//has been done with true
+		bool	connect();
+		// Receive string from bluetooth - not blocking operation
+		// return number of char received
+		// return -1 when the connection is broken
+		int16_t	receive(char *,int);
+		// Send string over bluetooth - blocking operation
+		// return false if disconnected
+		bool	send(char *);
    private:
-      boolean getHC05Connection();  
-      void forceHC05State(int);
-      int getHC05State();
-      int startHC05Inq(int);
-      boolean getHC05Mrad();
-      int getHC05ADCN();
-      int sendHC05AtCmd(char *, boolean);
-      void getHC05RName(char *);
-        
-      // list of devices detected
-      char detected_address[4][16];
-      int  detected_addressN;
-      unsigned long rates[6];
-      int forcedState;
-      
-      // state memory
-      boolean bootup;                    // true a boot to validate / unvalidate pairing
-      boolean reqPairing;                // switch to true to execute a pairing or re-pairing search
-      boolean initSuccess;		 // true if init finished in success
-   
+		bool		_getConnection();
+		void		_forceState(int16_t);
+		int16_t		_getState();
+		int16_t		_startInq(int16_t);
+		bool		_getMrad();
+		int16_t		_getADCN();
+		int16_t		_sendAtCmd(char *, boolean);
+		void		_getRName(char *);
+		// list of devices detected
+		char		detected_address[4][16];
+		int16_t		detected_addressN;
+		uint32_t	_baud_rates[6];
+		int16_t 	_forced_state;	// Signed
+		// state memory
+		bool 	bootup;			// true a boot to validate / unvalidate pairing
+		bool 	reqPairing;		// switch to true to execute a pairing or re-pairing search
+		bool 	initSuccess;	// true if init finished in success
  };
  
 #endif

@@ -1,77 +1,61 @@
-/* **********************************************************
- * HC05c library Header
- * **********************************************************
- * This source is under GNU GPL
- * Based on code form www.disk91.com
- * ----------------------------------------------------------
- * Libary size with debug elements about 13Kb w/o debug : 10 Kb
- * To setup the library, please configure the following #define
- * DEBUG => when set by #define DEBUG - activate logs
- * blueToothSerial => link the HC05 with the arduino Serial port choosen.
- * **********************************************************
- * THE disk91_HC05 SOFTWARE IS PROVIDED TO YOU "AS IS," AND WE MAKE NO EXPRESS 
- * OR IMPLIED WARRANTIES WHATSOEVER WITH RESPECT TO ITS FUNCTIONALITY, OPERABILITY,
- * OR USE, INCLUDING, WITHOUT LIMITATION, ANY IMPLIED WARRANTIES OF 
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR INFRINGEMENT. 
- * WE EXPRESSLY DISCLAIM ANY LIABILITY WHATSOEVER FOR ANY DIRECT, INDIRECT,
- * CONSEQUENTIAL, INCIDENTAL OR SPECIAL DAMAGES, INCLUDING, WITHOUT LIMITATION,
- * LOST REVENUES, LOST PROFITS, LOSSES RESULTING FROM BUSINESS INTERRUPTION OR 
- * LOSS OF DATA, REGARDLESS OF THE FORM OF ACTION OR LEGAL THEORY UNDER WHICH 
- * THE LIABILITY MAY BE ASSERTED, EVEN IF ADVISED OF THE POSSIBILITY OR LIKELIHOOD 
- * OF SUCH DAMAGES.
- * **********************************************************
- */
-#include "HC05c.h"
- 
-static const uint8_t BT_BUFFER_SIZE = 64;
-HC05c::HC05c()
-{
-   rates[0] = 38400; 
-   rates[1] = 38400; 
-   rates[2] = 115200;
-   rates[3] = 115200;
-   rates[4] = 9600;  
-   rates[5] = 19200; 
-   rates[6] = 57600; 
+#include <HC05c.h>
+
+static const char DEFAULT_PASSWORD = "1234";
+static const char BT_RESET[] = "RESET";
+static const char BT_FSAD[] = "FSAD";
+static const char BT_INIT[] = "INIT";
+static const char CRLF[] = "\r\n";
+
+HC05c::HC05c() {
+   _baud_rates[0] = 38400; 
+   _baud_rates[1] = 38400; 
+   _baud_rates[2] = 115200;
+   _baud_rates[3] = 115200;
+   _baud_rates[4] = 9600;  
+   _baud_rates[5] = 19200; 
+   _baud_rates[6] = 57600; 
    detected_addressN=0;
-   forcedState=ST_NOFORCE;
+   _forced_state=ST_NOFORCE;
 }
 
 /* --- Setup Bluetooth HC-05 device to be ready for inquiery
- * Set device name as BT_CAM, passwd 0000, inquiery time 10s to 1 device
+ * Set device name as BT_CAM, passwd 0000, inquiery search_iter 10s to 1 device
  */
-boolean HC05c::setupBlueToothConnection(char * devName)
-{
-  char _buffer[BT_BUFFER_SIZE];
+boolean HC05c::setupConnection(char * devName){
+	return setupConnection(devName, DEFAULT_PASSWORD);
+}
 
-  print_debug("Entering setupBlueToothConnection() ");
-  bootup = true;              // device is booting
-  reqPairing = ( getHC05ADCN() == 0 ) ;  // if no device is already paired, request pairing.
-  initSuccess = false;
-
-  if ( getHC05Connection() ) {    
-     if ( getHC05State() != 0 )  {
-        sendHC05AtCmd("RESET", true);          // If not in state initialized : reset
-        delay(5000);
-     }     
-     if ( getHC05State() == 0 )  {
-        sendHC05AtCmd("INIT",true);           // Init SPP
-        delay(2000);
-        strncpy(_buffer,"NAME=",6);
-        strncat(_buffer,devName,10);
-        sendHC05AtCmd(_buffer,true);    // BT displayed name
-        sendHC05AtCmd("PSWD=0000",true);      // pairing password is 0000
-        sendHC05AtCmd("UART=38400,0,0",true); // serial over BT rate + Arduino rate (next restart)
-        sendHC05AtCmd("IAC=9e8b33",true);     // use a Password for pairing
-        sendHC05AtCmd("CMODE=1",true);        // connect to any address
-        initSuccess = true;
-     }     
-  } else {
-    print_debug("Leaving setupBlueToothConnection() with error");
-    return false;
-  }
-  print_debug("Leaving setupBlueToothConnection() ");
-  return true;
+boolean HC05c::setupConnection(char * devName, char * passwd) {
+	char _buffer[BUFSZ];
+	print_debug("Entering setupConnection() ");
+	bootup = true;              // device is booting
+	reqPairing = ( getHC05ADCN() == 0 ) ;  // if no device is already paired, request pairing.
+	initSuccess = false;
+	if ( _getConnection() ) {    
+		if ( _getState() != 0 )  {
+			_sendAtCmd(BT_RESET, true);          // If not in state initialized : reset
+			delay(5000);
+		}     
+		if ( _getState() == 0 )  {
+			_sendAtCmd(BT_INIT,true);           // Init SPP
+			delay(2000);
+			strncpy(_buffer,"NAME=",6);
+			strncat(_buffer,devName,10);
+			_sendAtCmd(_buffer,true);    // BT displayed name
+			strncpy(_buffer,"PSWD=",6);
+			strncat(_buffer,passwd,10);
+			_sendAtCmd(_buffer,true);    // BT password
+			_sendAtCmd("UART=38400,0,0",true); // serial over BT rate + Arduino rate (next restart)
+			_sendAtCmd("IAC=9e8b33",true);     // use a Password for pairing
+			_sendAtCmd("CMODE=1",true);        // connect to any address
+			initSuccess = true;
+		}     
+	} else {
+		print_debug("Leaving setupConnection() with error");
+		return false;
+	}
+	print_debug("Leaving setupConnection() ");
+	return true;
 }
 
 
@@ -80,159 +64,140 @@ boolean HC05c::setupBlueToothConnection(char * devName)
  * has been done with true
  * --------------------------------------------------------------
  */
-boolean HC05c::connect() 
-{
- char buf[BUFSZ];
- int bufd;
- char recvChar,lrecvChar;
- int state;
- int time=0;
-
- if ( ! initSuccess ) return false;
- 
- while (1) {
-   state=getHC05State();
-   print_debug2("HC05 State : ",state);
-   switch ( state ) {
-      case ST_INITIALIZED:
-           // On startup, try to connect to existing device, then go for pairing if failed
-           if ( reqPairing ) {
-              reqPairing = false;
-              // Start a pairing process
-              forceHC05State(ST_SEARCH_FOR_PAIR);
-              time=0;
-           } else {
-              if ( getHC05ADCN() > 0 ) 
-                  forceHC05State(ST_PAIRED);
-              // mode sleep à travailler
-              delay(5000); 
-           }
-           break;           
-             
-      // Not a real existing case, just to simplify algotithm
-      case ST_SEARCH_FOR_PAIR:    
-           if ( time == 0 ) {
-               // for the first minute we can start to INQUIRE if someone whants to pair with us as a salve
-               sendHC05AtCmd("ROLE=0",true);       // salve mode
-               sendHC05AtCmd("CLASS=40620",true);  // this bt device type camera
-               sendHC05AtCmd("INQ",true);          // Start INQUIERING => change state to pairable  
-               print_debug("HC05 waiting for pairing as a slave");
-               bootup=false;			      // to not re-enter ...
-           } 
-           if ( time < MAX_SLAVE_TIME ) {
-               print_debug2("HC05 is inquiering as slave - ",time);
-               // Start inquiering ... this will change the status for PAIRABLE but we will proceed here
-               // At this point if OK is read it means that we are connected with the device ... Inquiery success and finished with +DISC
-               // already set : blueToothSerial.setTimeout(200);
-               bufd = blueToothSerial.readBytes(buf,BUFSZ);
-               if (bufd >= 2) {
-                 if ( buf[0] == 'O' && buf[1] == 'K' ) {
-                   forceHC05State(ST_PAIRED);
-                 }
-               }
-               delay(1000);
-               time++;      
-           } else {
-               print_debug("HC05 pairing as master");
-               // At the end of the enquiering delay, start to inquier in master mode ... 
-               forceHC05State(ST_NOFORCE);               // Stop Slave inquiering ... reinit
-               sendHC05AtCmd("RESET", true);          // Reset
-               delay(5000);
-               sendHC05AtCmd("INIT",true);            // Init SPP
-               delay(2000);
-
-               // Change mode to connect as a master
-               sendHC05AtCmd("ROLE=1",true);       // act as master
-               sendHC05AtCmd("CLASS=0",true);      // search for everything (use 200 for a smartphone)
-               startHC05Inq(MAX_MASTER_TIME); 
-               // Did we found something ?
-               if (  detected_addressN > 0 ) {
-                   // First try to connected to already known devices if we have
-                   for ( int k = 0 ; k < detected_addressN ; k++ ) {
-                     strncpy(buf,"FSAD=",BT_BUFFER_SIZE);
-                     if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),true) < 0 ) {
-                       // this address is already known ... linking
-                       strncpy(buf,"LINK=",BT_BUFFER_SIZE);
-                       if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),false) < 0 ) break;     //link sucess
-                     }
-                   }
-                 
-                   // Then try to pair to listed devices
-                   for ( int k = 0 ; k < detected_addressN ; k++ ) {
-                     strncpy(buf,"FSAD=",BT_BUFFER_SIZE);
-                     if ( sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),true) == COD_FAIL ) {
-                       strncpy(buf,"PAIR=",BT_BUFFER_SIZE);
-                       strnncat(buf,detected_address[k],BT_BUFFER_SIZE - 6);
-                       strncat(buf,",20",BT_BUFFER_SIZE - 14 - 6);
-                       if (sendHC05AtCmd(buf,false) < 0 ) {
-                            // pairing  sucess
-                            strncpy(buf,"LINK=",BT_BUFFER_SIZE);
-                            if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),false) < 0 ) {
-                              forceHC05State(ST_CONNECTED);
-                              break;     //link sucess
-                            }
-                        }
-                     }
-                   }
-                 }
-                 forceHC05State(ST_NOFORCE);
-           }
-           break;
-
-      case ST_PAIRABLE:
-           break;
-           
-      case ST_INQUIERING:
-           print_debug("HC05 is inquiering - invalid state");
-           // reset
-           forceHC05State(ST_NOFORCE);               // Stop Slave inquiering ... reinit
-           sendHC05AtCmd("RESET", true);          // Reset
-           delay(5000);
-           sendHC05AtCmd("INIT",true);            // Init SPP
-           delay(2000);
-           break;
-          
-      case ST_PAIRED:
-           print_debug("HC05 is paired to a device");
-           if ( getHC05Mrad() ) {
-               // Connect to the last device if possible
-               strncpy(buf,"LINK=",BT_BUFFER_SIZE);
-               if (sendHC05AtCmd(strncat(buf,detected_address[0],BT_BUFFER_SIZE - 6),false) < 0 ) {
-                 forceHC05State(ST_CONNECTED);
-               }
-               else {
-		 // If connection not succeed, back to standard process ...
-                 sendHC05AtCmd(" ",true); // it seems that after a AT+LINK the next AT command is not concidered
-                
-                 // When connection fail, if at bootup, we start a new pairing process
-                 if ( bootup ) {
-                    reqPairing = true;                  
-                    forceHC05State(ST_NOFORCE); 
-                 }
-               }
-           }
-           bootup = false; // bootup period is finished after first pairing try
-           break;
-            
-      case ST_DISCONNECTED:
-           print_debug("Disconnection detected");
-           sendHC05AtCmd("RESET", true);          // If not in state initialized : reset
-           delay(5000);
-           sendHC05AtCmd("INIT",true);            // Init SPP
-           delay(2000);
-           break;
-
-      case ST_CONNECTED:
-           print_debug("Device Connected");
-           return true;
-
-
-      default:
-           delay(1000);
-           break;
-   }      
- }
-
+bool HC05c::connect() {
+	char buf[BUFSZ];
+	int bufd;
+	char recvChar,lrecvChar;
+	int state;
+	uint16_t search_iter=0;
+	if ( ! initSuccess ) return false;
+	while (true) {
+		state=_getState();
+		print_debug2("HC05 State : ",state);
+		switch ( state ) {
+			case ST_INITIALIZED:
+				// On startup, try to connect to existing device, then go for pairing if failed
+				if ( reqPairing ) {
+					reqPairing = false;
+					// Start a pairing process
+					_forceState(ST_SEARCH_FOR_PAIR);
+					search_iter=0;
+				}
+				else {
+					if ( getHC05ADCN() > 0 ) _forceState(ST_PAIRED);
+					// mode sleep à travailler
+					delay(5000); 
+				}
+				break;   
+			// Not a real existing case, just to simplify algorithm
+			case ST_SEARCH_FOR_PAIR:    
+				if ( search_iter == 0 ) {
+					// for the first minute we can start to INQUIRE if someone wants to pair with us as a salve
+					_sendAtCmd("ROLE=0",true);       // slave mode
+					_sendAtCmd("INQ",true);          // Start INQUIERING => change state to pairable  
+					print_debug("HC05 waiting for pairing as a slave");
+					bootup=false;			      // to not re-enter ...
+				} 
+				if ( search_iter < MAX_SLAVE_TIME ) {
+					print_debug2("HC05 is inquiring as slave - ",search_iter);
+					// Start inquiring ... this will change the status for PAIRABLE but we will proceed here
+					// At this point if OK is read it means that we are connected with the device ... Inquiry success and finished with +DISC
+					// already set : blueToothSerial.setTimeout(200);
+					bufd = blueToothSerial.readBytes(buf,BUFSZ);
+					if (bufd >= 2) && buf[0] == 'O' && buf[1] == 'K' ) _forceState(ST_PAIRED);
+					delay(1000);
+					search_iter++;      
+				}
+				else {
+					print_debug("HC05 pairing as master");
+					// At the end of the inquiring delay, start to inquirer in master mode ... 
+					_forceState(ST_NOFORCE);               // Stop Slave inquiring ... reinit
+					_sendAtCmd(BT_RESET, true);          // Reset
+					delay(5000);
+					_sendAtCmd(BT_INIT,true);            // Init SPP
+					delay(2000);
+					// Change mode to connect as a master
+					_sendAtCmd("ROLE=1",true);       // act as master
+					_sendAtCmd("CLASS=0",true);      // search for everything (use 200 for a smartphone)
+					_startInq(MAX_MASTER_TIME); 
+					// Did we found something ?
+					if (  detected_addressN > 0 ) {
+						// First try to connected to already known devices if we have
+						for ( uint8_t k = 0 ; k < detected_addressN ; k++ ) {
+							strncpy(buf,BT_FSAD,BUFSZ);
+							if (_sendAtCmd(strncat(buf,detected_address[k],BUFSZ - 6),true) < 0 ) {
+								// this address is already known ... linking
+								strncpy(buf,"LINK=",BUFSZ);
+								if (_sendAtCmd(strncat(buf,detected_address[k],BUFSZ - 6),false) < 0 ) break;     //link sucess
+							}
+						}
+						// Then try to pair to listed devices
+						for ( uint8_t k = 0 ; k < detected_addressN ; k++ ) {
+							strncpy(buf,BT_FSAD,BUFSZ);
+							if ( _sendAtCmd(strncat(buf,detected_address[k],BUFSZ - 6),true) == COD_FAIL ) {
+							strncpy(buf,"PAIR=",BUFSZ);
+							strnncat(buf,detected_address[k],BUFSZ - 6);
+							strncat(buf,",20",BUFSZ - 14 - 6);
+							if (_sendAtCmd(buf,false) < 0 ) {
+									// pairing  sucess
+									strncpy(buf,"LINK=",BUFSZ);
+									if (_sendAtCmd(strncat(buf,detected_address[k],BUFSZ - 6),false) < 0 ) {
+									_forceState(ST_CONNECTED);
+									break;     //link sucess
+									}
+								}
+							}
+						}
+						}
+						_forceState(ST_NOFORCE);
+				}
+				break;
+			case ST_PAIRABLE:
+				break;
+			case ST_INQUIERING:
+				print_debug("HC05 is inquiering - invalid state");
+				// reset
+				_forceState(ST_NOFORCE);               // Stop Slave inquiering ... reinit
+				_sendAtCmd(BT_RESET, true);          // Reset
+				delay(5000);
+				_sendAtCmd(BT_INIT,true);            // Init SPP
+				delay(2000);
+				break;
+			case ST_PAIRED:
+				print_debug("HC05 is paired to a device");
+				if ( getHC05Mrad() ) {
+					// Connect to the last device if possible
+					strncpy(buf,"LINK=",BUFSZ);
+					if (_sendAtCmd(strncat(buf,detected_address[0],BUFSZ - 6),false) < 0 ) {
+					 _forceState(ST_CONNECTED);
+					}
+					else {
+						// If connection not succeed, back to standard process ...
+						_sendAtCmd(" ",true); // it seems that after a AT+LINK the next AT command is not concidered
+						// When connection fail, if at bootup, we start a new pairing process
+						if ( bootup ) {
+							reqPairing = true;                  
+							_forceState(ST_NOFORCE); 
+						}
+					}
+				}
+				bootup = false; // bootup period is finished after first pairing try
+				break;
+			case ST_DISCONNECTED:
+				print_debug("Disconnection detected");
+				_sendAtCmd(BT_RESET, true);          // If not in state initialized : reset
+				delay(5000);
+				_sendAtCmd(BT_INIT,true);            // Init SPP
+				delay(2000);
+				break;
+			case ST_CONNECTED:
+				print_debug("Device Connected");
+				return true;
+			default:
+				delay(1000);
+				break;
+		}
+	}
 }
 
 /* ---------------------------------------------------------------
@@ -241,25 +206,22 @@ boolean HC05c::connect()
  * return -1 when the connection is broken
  * ---------------------------------------------------------------
  */
-int HC05c::receive(char * buf, int maxsz) 
-{
-    int bufd;
-    if ( getHC05State() != ST_CONNECTED )
-      return -1;
-      
-    // We are waiting for +DISC command now on blueToothSerial to quit the connection mode
-    bufd = blueToothSerial.readBytes(buf,BUFSZ);
-    if (bufd > 0 ) {
-       if (bufd > 5) {
-          if ( buf[0] == '+' && buf[1] == 'D' && buf[2] == 'I' && buf[3] == 'S' && buf[4] == 'C' ) {
-             // detect disconnection
-             forceHC05State(ST_NOFORCE);
-             return -1;
-          } 
-       }
-       buf[bufd]=0;
-     }
-     return bufd;
+int HC05c::receive(char * buf, int maxsz) {
+	int16_t bufd;
+	if ( _getState() != ST_CONNECTED ) return -1;
+	// We are waiting for +DISC command now on blueToothSerial to quit the connection mode
+	bufd = blueToothSerial.readBytes(buf,BUFSZ);
+	if (bufd > 0 ) {
+		if (bufd > 5) {
+			if ( buf[0] == '+' && buf[1] == 'D' && buf[2] == 'I' && buf[3] == 'S' && buf[4] == 'C' ) {
+				// detect disconnection
+				_forceState(ST_NOFORCE);
+				return -1;
+			} 
+		}
+		buf[bufd]=0;
+	}
+	return bufd;
 }
 
 /* ---------------------------------------------------------------
@@ -267,12 +229,10 @@ int HC05c::receive(char * buf, int maxsz)
  * return false if disconnected
  * ---------------------------------------------------------------
  */
-boolean HC05c::send(char * buf) 
-{
-    if ( getHC05State() == ST_CONNECTED ) 
-       blueToothSerial.print(buf);
-    else return false;
-    return true;
+boolean HC05c::send(char * buf) {
+	if ( _getState() != ST_CONNECTED ) return false;
+	blueToothSerial.print(buf);
+	return true;
 }
 
 
@@ -285,31 +245,30 @@ boolean HC05c::send(char * buf)
 /* --- Search for HC05 device and baudrate 
  * (peace of code from https://github.com/jdunmire/HC05 project)
  * send AT at different baudrate and expect OK
- * it seems that testing multiple time the same rate ensure to have a better detection
+ * it seems that testing multiple search_iter the same rate ensure to have a better detection
  * return true is found, false otherwise.
  */
-boolean HC05c::getHC05Connection() {
-  int numRates = sizeof(rates)/sizeof(unsigned long);
-  int recvd = 0;
-  char _buffer[128];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-    
-  print_debug("Entering getHC05Connection()");
-  for(int rn = 0; rn < numRates; rn++)
-  {
-    print_debug2(" * Trying new rate : ",rates[rn]);
-    blueToothSerial.begin(rates[rn]);
-    blueToothSerial.setTimeout(200);
-    blueToothSerial.write("AT\r\n");
-    delay(200);
-    recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-    if (recvd > 0) {
-      print_debug("Leaving getHC05Connection() - Found card ");
-      return true;
-    } 
-  }
-  print_debug("Leaving getHC05Connection() - Not Found ");
-  return false;
+boolean HC05c::_getConnection() {
+	uint16_t numRates = sizeof(_baud_rates)/sizeof(unsigned long);
+	uint16_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	print_debug("Entering _getConnection()");
+	for(uint16_t rn = 0; rn < numRates; rn++) {
+		print_debug2(" * Trying new rate : ",_baud_rates[rn]);
+		blueToothSerial.begin(_baud_rates[rn]);
+		blueToothSerial.setTimeout(200);
+		blueToothSerial.write("AT");
+		blueToothSerial.write(CRLF);
+		delay(200);
+		recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+		if (recvd > 0) {
+			print_debug("Leaving _getConnection() - Found card ");
+			return true;
+		} 
+	}
+	print_debug("Leaving _getConnection() - Not Found ");
+	return false;
 }
 
 /* --- Force a specific state as the HC05 does not commute as I could expect
@@ -317,8 +276,8 @@ boolean HC05c::getHC05Connection() {
  * this forced state is back to ST_ERROR
  */
 
-void HC05c::forceHC05State(int state) {
-   forcedState=state;
+void HC05c::_forceState(int state) {
+	_forced_state=state;
 }
 
 /* --- Get STATE return state code, according to:
@@ -327,137 +286,129 @@ void HC05c::forceHC05State(int state) {
  *  4 : INQUIRING        5 : CONNECTING   6 : CONNECTED   7 : DISCONNECTED
  *  8 : NUKNOW
  */
-int HC05c::getHC05State() {
-  int recvd = 0;
-  char _buffer[128];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-  int ret=ST_ERROR;
-
-   print_debug("Entering getHC05State()");
-   if (forcedState == ST_NOFORCE ) {
-   
-     blueToothSerial.print("AT+STATE?\r\n"); 
-     delay(200);
-     recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-     if (recvd > 2 ) {
-         int i = 0;
-         while ( i < _bufsize-1 ) {
-            if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
-            else i++;
-         }
-         print_debug2(" * State Received :",_buffer);
-         if ( recvd > 12 ) {
-           switch (_buffer[7]) {
-             case 'R' : ret= 1; break; 
-             case 'D' : ret= 7; break;
-             case 'I' : ret= (_buffer[9]=='I')?0:4; break;
-             case 'P' : ret= (_buffer[11]=='A')?2:3; break;
-             case 'C' : if ( recvd > 16 ) ret = ( _buffer[14] == 'I')?5:6; else ret= ST_ERROR; break;    
-             default : ret = ST_ERROR; break;
-           }
-         }
-     } else ret= ST_ERROR;
-   } else {
-     ret = forcedState; 
-   }
-   // Other cases : consider as valid command
-   print_debug2("Leaving getHC05State() with ret code : ",ret);
-   return ret;   
+int HC05c::_getState() {
+	uint16_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	int16_t ret = ST_ERROR;
+	print_debug("Entering _getState()");
+	if (_forced_state == ST_NOFORCE ) {
+		blueToothSerial.print("AT+STATE?\r\n"); 
+		delay(200);
+		recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+		if (recvd > 2 ) {
+			uint8_t i = 0;
+			while ( i < _bufsize-1 ) {
+				if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
+				else i++;
+			}
+			print_debug2(" * State Received :",_buffer);
+			if ( recvd > 12 ) {
+				switch (_buffer[7]) {
+					case 'R' : ret= 1; break; 
+					case 'D' : ret= 7; break;
+					case 'I' : ret= (_buffer[9]=='I')?0:4; break;
+					case 'P' : ret= (_buffer[11]=='A')?2:3; break;
+					case 'C' : if ( recvd > 16 ) ret = ( _buffer[14] == 'I')?5:6; else ret= ST_ERROR; break;    
+					default : ret = ST_ERROR; break;
+				}
+			}
+		} else ret= ST_ERROR;
+	} else	ret = _forced_state;
+	// Other cases : consider as valid command
+	print_debug2("Leaving _getState() with ret code : ",ret);
+	return ret;   
 } 
 
 
-/* --- Start Inquiering
- * start inquering, results are read from the serial line
- * timeout is set
- * return number of results
+/* --- Start Enquiring
+ * start inquiring, results are read from the serial line
+ * timeout is set return number of results
  */
-int HC05c::startHC05Inq(int timeout ) {
-  int recvd = 0;
-  char _buffer[512];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-
-   print_debug("Entering startHC05Inq()");
-   sprintf(_buffer,"INQM=1,4,%d",timeout); // mode rssi, 4 device max, timeout*1.28s max
-   sendHC05AtCmd(_buffer,true);
-   blueToothSerial.print("AT+INQ\r\n");           // start INQ                     
-   delay(1300*timeout);
-   recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-   sendHC05AtCmd("INQC",true);                  // Retour etat INITIALIZED
-   blueToothSerial.flush();
-   // Search for addresses in format : +INQ:aaaa:aa:aaaa,ttttt,ppppp 
-   detected_addressN = 0;
-   int i=0, v;
-   while ( i < recvd ) {
-     if ( recvd - i > 15 ) { // do not spend time looking for address is less than 15 byte
-       if ( _buffer[i] == '+'  && _buffer[i+1] == 'I' && _buffer[i+2] == 'N' && _buffer[i+3] == 'Q' && _buffer[i+4] == ':' ) {
-         // we have detected a response, search for separator (,)
-         v=i+5;
-         while ( v < recvd && _buffer[v] != ',' ) v++;
-         if ( v < recvd ) { 
-           memcpy(detected_address[detected_addressN],&_buffer[i+5], v-(i+5));  // copy address bloc
-           detected_address[detected_addressN][v-(i+5)+1]=0;                    // add end of line
-           
-           for (int k=0 ; detected_address[detected_addressN][k] != 0 ; k++ )   // Change ':' separator by ',' as it will be this syntaxe latter used
-              if ( detected_address[detected_addressN][k] == ':' ) detected_address[detected_addressN][k] = ',';
-              
-           int c=0;                                                             // we should count already existing occurence of this address
-           for ( int j=0 ; j < detected_addressN ; j++ ) 
-             if ( strcmp(detected_address[j],detected_address[detected_addressN]) == 0 ) c++;
-           if ( c == 0 ) {
-              print_debug2("Address found : ",detected_address[detected_addressN]);
-              getHC05RName(detected_address[detected_addressN]);
-              detected_addressN++;
-              if (detected_addressN == 4 ) return 4;                            // No place left on table, skip
-           }
-           i=v;                                                                 // goto next
-         }
-       }
-     }
-     i++;
-   }
-   print_debug2("Leaving startHC05Inq() with ret code : ",detected_addressN);
-   return detected_addressN;   
+int HC05c::_startInq(int timeout ) {
+	uint8_t recvd = 0;
+	char _buffer[512];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	print_debug("Entering _startInq()");
+	sprintf(_buffer,"INQM=1,4,%d",timeout); // mode rssi, 4 device max, timeout*1.28s max
+	_sendAtCmd(_buffer,true);
+	blueToothSerial.print("AT+INQ");           // start INQ    
+	blueToothSerial.print(CRLF);           // start INQ                     
+	delay(1300*timeout);
+	recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+	_sendAtCmd("INQC",true);                  // Retour etat INITIALIZED
+	blueToothSerial.flush();
+	// Search for addresses in format : +INQ:aaaa:aa:aaaa,ttttt,ppppp 
+	detected_addressN = 0;
+	uint8_t i = 0, v;
+	while ( i < recvd ) {
+		if ( recvd - i > 15 ) { // do not spend search_iter looking for address is less than 15 byte
+			if ( _buffer[i] == '+'  && _buffer[i+1] == 'I' && _buffer[i+2] == 'N' && _buffer[i+3] == 'Q' && _buffer[i+4] == ':' ) {
+				// we have detected a response, search for separator (,)
+				v=i+5;
+				while ( v < recvd && _buffer[v] != ',' ) v++;
+				if ( v < recvd ) { 
+					memcpy(detected_address[detected_addressN],&_buffer[i+5], v-(i+5));  // copy address bloc
+					detected_address[detected_addressN][v-(i+5)+1]=0;                    // add end of line
+					
+					for (int k=0 ; detected_address[detected_addressN][k] != 0 ; k++ ) {	// Change ':' separator by ',' as it will be this syntaxe latter used
+						if ( detected_address[detected_addressN][k] == ':' ) detected_address[detected_addressN][k] = ',';
+					}
+					int c=0;                                                             // we should count already existing occurence of this address
+					for ( int j=0 ; j < detected_addressN ; j++ ) {
+						if ( strcmp(detected_address[j],detected_address[detected_addressN]) == 0 ) c++;
+					}
+					if ( c == 0 ) {
+						print_debug2("Address found : ",detected_address[detected_addressN]);
+						getHC05RName(detected_address[detected_addressN]);
+						detected_addressN++;
+						if (detected_addressN == 4 ) return 4;                            // No place left on table, skip
+					}
+					i=v;                                                                 // goto next
+				}
+			}
+		}
+		i++;
+	}
+	print_debug2("Leaving _startInq() with ret code : ",detected_addressN);
+	return detected_addressN;   
  } 
 
 /* --- Get MRAD - Most Recent Used Address
  * return it in detected_Address[0], empty this table if not failed
  */
  boolean HC05c::getHC05Mrad() {
-   int recvd = 0;
-   char _buffer[128];
-   int _bufsize = sizeof(_buffer)/sizeof(char);
-
-   print_debug("Entering getHC05Mrad()");
-   
-   blueToothSerial.print("AT+MRAD?\r\n");
-   delay(200);
-   recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-   if (recvd > 6 ) {
-       int i = 0;
-       while ( i < _bufsize-1 ) {
-          if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
-          else i++;
-       }
-       print_debug2(" * Received :",_buffer);
-       if ( _buffer[0]=='+' && _buffer[1] == 'M' ) {
-         int v=6;
-         while ( v < recvd && _buffer[v] != 0 ) v++;
-         if ( v < recvd ) {
-            memcpy(detected_address[0],&_buffer[6], v-6);                        // copy address bloc
-            detected_address[0][v-6+1]=0;                        // add end of line
-           
-            for (int k=0 ; detected_address[0][k] != 0 ; k++ )   // Change ':' separator by ',' as it will be this syntaxe latter used
-              if ( detected_address[0][k] == ':' ) detected_address[0][k] = ',';
-              
-            detected_addressN = 1;
-            print_debug("Leaving getHC05Mrad() - true");
-            return true;
-         }        
-       }
-   }
-   // Other cases : consider as valid command
-   print_debug("Leaving getHC05Mrad() - false");
-   return false;
+	uint8_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	print_debug("Entering getHC05Mrad()");
+	blueToothSerial.print("AT+MRAD?\r\n");
+	delay(200);
+	recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+	if (recvd > 6 ) {
+		uint8_t i = 0;
+		while ( i < _bufsize-1 ) {
+			if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
+			else i++;
+		}
+		print_debug2(" * Received :",_buffer);
+		if ( _buffer[0]=='+' && _buffer[1] == 'M' ) {
+			uint8_t v=6;
+			while ( v < recvd && _buffer[v] != 0 ) v++;
+			if ( v < recvd ) {
+				memcpy(detected_address[0],&_buffer[6], v-6);	// copy address bloc
+				detected_address[0][v-6+1]=0;					// add end of line
+				for (uint8_t k=0 ; detected_address[0][k] != 0 ; k++ )   // Change ':' separator by ',' as it will be this syntaxe latter used
+				if ( detected_address[0][k] == ':' ) detected_address[0][k] = ',';
+				detected_addressN = 1;
+				print_debug("Leaving getHC05Mrad() - true");
+				return true;
+			}        
+		}
+	}
+	// Other cases : consider as valid command
+	print_debug("Leaving getHC05Mrad() - false");
+	return false;
 }
     
  
@@ -467,27 +418,26 @@ int HC05c::startHC05Inq(int timeout ) {
  * return -1 when error
  */
 int HC05c::getHC05ADCN(){
-  int recvd = 0;
-  char _buffer[128];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-  int ret=-1;
-
-   print_debug("Entering getHC05ADCN()");
-   blueToothSerial.print("AT+ADCN?\r\n"); 
-   delay(200);
-   recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-   if (recvd > 7 ) { // test valid for 2 digit or 1 digit + \n
-      if ( _buffer[0] == '+' ) {
-         ret = _buffer[6] - '0'; 
-         if ( _buffer[7] >= '0' && _buffer[7] <= '9' )
-           ret = 10*ret + _buffer[7]-'0';
-      }   
-      print_debug2(" * ADCN :",ret);
-   } else ret= -1;
-   // Other cases : consider as valid command
-   print_debug2("Leaving getHC05ADCN() with ret code : ",ret);
-   return ret;   
-} 
+	uint8_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	int16_t ret = -1;
+	print_debug("Entering getHC05ADCN()");
+	blueToothSerial.print("AT+ADCN?\r\n"); 
+	delay(200);
+	recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+	if (recvd > 7 ) { // test valid for 2 digit or 1 digit + \n
+		if ( _buffer[0] == '+' ) {
+			ret = _buffer[6] - '0'; 
+			if ( _buffer[7] >= '0' && _buffer[7] <= '9' ) ret = 10 * ret + _buffer[7] - '0';
+		}
+		print_debug2(" * ADCN :",ret);
+	}
+	else ret = -1;
+	// Other cases : consider as valid command
+	print_debug2("Leaving getHC05ADCN() with ret code : ",ret);
+	return ret;   
+}
  
 /* --- Send AT Command and get Error code back
  * imediate : when true directly read result, do not wait them to come
@@ -501,50 +451,47 @@ int HC05c::getHC05ADCN(){
  * 12 - No Inquire ac        13 - Too long inq ac     14 - Invalid inq ac code  15 - Passkay Lenght is 0
  * 16 - Passkey len too long 17 - Invalide modul role 18 - Invalid baud rate    19 - Invalid strop bit
  * 20 - Invalid parity bit   21 - auth dev not pair   22 - SPP not init         23 - SPP has been init
- * 24 - Invalid inq mode     25 - Too long inq time   26 - No BT addresse       27 - Invalid safe mode
+ * 24 - Invalid inq mode     25 - Too long inq search_iter   26 - No BT addresse       27 - Invalid safe mode
  * 28 - Invalid encryptmode  30 - FAIL
  */
-int HC05c::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
-  int recvd = 0;
-  char _buffer[128];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-  int ret=-1;
-
-   print_debug("Entering sendHC05AtCmd()");
-   
-   print_debug2(" * Send : ",atcmdstr);
-   blueToothSerial.print("AT+");
-   blueToothSerial.print(atcmdstr);
-   blueToothSerial.print("\r\n"); 
-   delay(200);
-   while ( ( recvd = blueToothSerial.readBytes(_buffer,_bufsize) ) == 0 && (! imediate) ) delay(100);
-   
-#ifdef DEBUG
-     if (recvd > 0 ) {
-       int i = 0;
-       while ( i < _bufsize-1 ) {
-          if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
-          else i++;
-       }
-       print_debug2(" * Received :",_buffer);
-     }
+int HC05c::_sendAtCmd(char * atcmdstr, boolean imediate) {
+	uint8_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	int16_t ret = -1;
+	print_debug("Entering _sendAtCmd()");
+	print_debug2(" * Send : ",atcmdstr);
+	blueToothSerial.print("AT+");
+	blueToothSerial.print(atcmdstr);
+	blueToothSerial.print(CRLF); 
+	delay(200);
+	while ( ( recvd = blueToothSerial.readBytes(_buffer,_bufsize) ) == 0 && (! imediate) ) delay(100);
+#ifdef BT_DEBUG
+	if (recvd > 0 ) {
+		uint8_t i = 0;
+		while ( i < _bufsize-1 ) {
+			if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
+			else i++;
+		}
+		print_debug2(" * Received :",_buffer);
+	}
 #endif
-   if (recvd >= 2) {
-     if ( _buffer[0] == 'O' && _buffer[1] == 'K' ) ret=-1;     
-     else if ( _buffer[0] == 'E' ) {
-       // Get Error number if _buffer[8] = ')' then 1 digit error code, else 2 digit
-       if ( recvd >= 9 ) {
-         ret = ( _buffer[8] != ')' )?16*(hex2dec(_buffer[7]))+(hex2dec(_buffer[8])):hex2dec(_buffer[7]);
-         print_debug2(" * Error code : ",ret);
-       }
-     } else if ( _buffer[0] == 'F' ) {
-       print_debug(" * Error code : FAIL");
-       ret=COD_FAIL;
-     }
-   }
-   // Other cases : consider as valid command
-   print_debug("Leaving sendHC05AtCmd()");
-   return ret;  
+	if (recvd >= 2) {
+		if ( _buffer[0] == 'O' && _buffer[1] == 'K' ) ret = -1;     
+		else if ( _buffer[0] == 'E' ) {
+			// Get Error number if _buffer[8] = ')' then 1 digit error code, else 2 digit
+			if ( recvd >= 9 ) {
+				ret = ( _buffer[8] != ')' )?16*(hex2dec(_buffer[7]))+(hex2dec(_buffer[8])):hex2dec(_buffer[7]);
+				print_debug2(" * Error code : ",ret);
+			}
+		} else if ( _buffer[0] == 'F' ) {
+			print_debug(" * Error code : FAIL");
+			ret=COD_FAIL;
+		}
+	}
+	// Other cases : consider as valid command
+	print_debug("Leaving _sendAtCmd()");
+	return ret;  
 }
 
 
@@ -554,31 +501,28 @@ int HC05c::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
  * AT+RNAME?34C0,59,F191D5
  */
 void HC05c::getHC05RName(char * raddr) {
-#ifdef DEBUG
-  int recvd = 0;
-  char _buffer[128];
-  int _bufsize = sizeof(_buffer)/sizeof(char);
-  int ret=-1;
-
-   print_debug("Entering getHC05RName()");
-   
-   print_debug2(" * Request For : ",raddr);
-   
-   blueToothSerial.print("AT+RNAME?");
-   blueToothSerial.print(raddr);
-   blueToothSerial.print("\r\n"); 
-   delay(5000);
-   recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-   if (recvd > 0 ) {
-       int i = 0;
-       while ( i < _bufsize-1 ) {
-          if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
-          else i++;
-       }
-       print_debug2(" * Received :",_buffer);
-   }
-   // Other cases : consider as valid command
-   print_debug("Leaving getHC05RName()");
+#ifdef BT_DEBUG
+	uint8_t recvd = 0;
+	char _buffer[128];
+	uint8_t _bufsize = sizeof(_buffer)/sizeof(char);
+	int16_t ret = -1;
+	print_debug("Entering getHC05RName()");
+	print_debug2(" * Request For : ",raddr);
+	blueToothSerial.print("AT+RNAME?");
+	blueToothSerial.print(raddr); // why?
+	blueToothSerial.print(CRLF); 
+	delay(5000);
+	recvd = blueToothSerial.readBytes(_buffer,_bufsize);
+	if (recvd > 0 ) {
+		int i = 0;
+		while ( i < _bufsize-1 ) {
+			if ( _buffer[i] == '\n' ) { _buffer[i] = 0 ; i = _bufsize; }
+			else i++;
+		}
+		print_debug2(" * Received :",_buffer);
+	}
+	// Other cases : consider as valid command
+	print_debug("Leaving getHC05RName()");
 #endif
 }
 
