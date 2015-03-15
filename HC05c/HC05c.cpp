@@ -1,8 +1,8 @@
 /* **********************************************************
- * Disk91_HC05 library Header
+ * HC05c library Header
  * **********************************************************
  * This source is under GNU GPL
- * Any information : contact me on www.disk91.com
+ * Based on code form www.disk91.com
  * ----------------------------------------------------------
  * Libary size with debug elements about 13Kb w/o debug : 10 Kb
  * To setup the library, please configure the following #define
@@ -21,9 +21,10 @@
  * OF SUCH DAMAGES.
  * **********************************************************
  */
-#include "disk91_hc05.h"
+#include "HC05c.h"
  
-Disk91_hc05::Disk91_hc05()
+static const uint8_t BT_BUFFER_SIZE = 64;
+HC05c::HC05c()
 {
    rates[0] = 38400; 
    rates[1] = 38400; 
@@ -39,9 +40,9 @@ Disk91_hc05::Disk91_hc05()
 /* --- Setup Bluetooth HC-05 device to be ready for inquiery
  * Set device name as BT_CAM, passwd 0000, inquiery time 10s to 1 device
  */
-boolean Disk91_hc05::setupBlueToothConnection(char * devName)
+boolean HC05c::setupBlueToothConnection(char * devName)
 {
-  char _buffer[128];
+  char _buffer[BT_BUFFER_SIZE];
 
   print_debug("Entering setupBlueToothConnection() ");
   bootup = true;              // device is booting
@@ -50,19 +51,19 @@ boolean Disk91_hc05::setupBlueToothConnection(char * devName)
 
   if ( getHC05Connection() ) {    
      if ( getHC05State() != 0 )  {
-        sendHC05AtCmd("AT+RESET", true);          // If not in state initialized : reset
+        sendHC05AtCmd("RESET", true);          // If not in state initialized : reset
         delay(5000);
      }     
      if ( getHC05State() == 0 )  {
-        sendHC05AtCmd("AT+INIT",true);           // Init SPP
+        sendHC05AtCmd("INIT",true);           // Init SPP
         delay(2000);
-        strcpy(_buffer,"AT+NAME=");
-        strcat(_buffer,devName);
+        strncpy(_buffer,"NAME=",6);
+        strncat(_buffer,devName,10);
         sendHC05AtCmd(_buffer,true);    // BT displayed name
-        sendHC05AtCmd("AT+PSWD=0000",true);      // pairing password is 0000
-        sendHC05AtCmd("AT+UART=38400,0,0",true); // serial over BT rate + Arduino rate (next restart)
-        sendHC05AtCmd("AT+IAC=9e8b33",true);     // use a Password for pairing
-        sendHC05AtCmd("AT+CMODE=1",true);        // connect to any address
+        sendHC05AtCmd("PSWD=0000",true);      // pairing password is 0000
+        sendHC05AtCmd("UART=38400,0,0",true); // serial over BT rate + Arduino rate (next restart)
+        sendHC05AtCmd("IAC=9e8b33",true);     // use a Password for pairing
+        sendHC05AtCmd("CMODE=1",true);        // connect to any address
         initSuccess = true;
      }     
   } else {
@@ -79,7 +80,7 @@ boolean Disk91_hc05::setupBlueToothConnection(char * devName)
  * has been done with true
  * --------------------------------------------------------------
  */
-boolean Disk91_hc05::connect() 
+boolean HC05c::connect() 
 {
  char buf[BUFSZ];
  int bufd;
@@ -112,9 +113,9 @@ boolean Disk91_hc05::connect()
       case ST_SEARCH_FOR_PAIR:    
            if ( time == 0 ) {
                // for the first minute we can start to INQUIRE if someone whants to pair with us as a salve
-               sendHC05AtCmd("AT+ROLE=0",true);       // salve mode
-               sendHC05AtCmd("AT+CLASS=40620",true);  // this bt device type camera
-               sendHC05AtCmd("AT+INQ",true);          // Start INQUIERING => change state to pairable  
+               sendHC05AtCmd("ROLE=0",true);       // salve mode
+               sendHC05AtCmd("CLASS=40620",true);  // this bt device type camera
+               sendHC05AtCmd("INQ",true);          // Start INQUIERING => change state to pairable  
                print_debug("HC05 waiting for pairing as a slave");
                bootup=false;			      // to not re-enter ...
            } 
@@ -135,38 +136,38 @@ boolean Disk91_hc05::connect()
                print_debug("HC05 pairing as master");
                // At the end of the enquiering delay, start to inquier in master mode ... 
                forceHC05State(ST_NOFORCE);               // Stop Slave inquiering ... reinit
-               sendHC05AtCmd("AT+RESET", true);          // Reset
+               sendHC05AtCmd("RESET", true);          // Reset
                delay(5000);
-               sendHC05AtCmd("AT+INIT",true);            // Init SPP
+               sendHC05AtCmd("INIT",true);            // Init SPP
                delay(2000);
 
                // Change mode to connect as a master
-               sendHC05AtCmd("AT+ROLE=1",true);       // act as master
-               sendHC05AtCmd("AT+CLASS=0",true);      // search for everything (use 200 for a smartphone)
+               sendHC05AtCmd("ROLE=1",true);       // act as master
+               sendHC05AtCmd("CLASS=0",true);      // search for everything (use 200 for a smartphone)
                startHC05Inq(MAX_MASTER_TIME); 
                // Did we found something ?
                if (  detected_addressN > 0 ) {
                    // First try to connected to already known devices if we have
                    for ( int k = 0 ; k < detected_addressN ; k++ ) {
-                     strcpy(buf,"AT+FSAD=");
-                     if (sendHC05AtCmd(strcat(buf,detected_address[k]),true) < 0 ) {
+                     strncpy(buf,"FSAD=",BT_BUFFER_SIZE);
+                     if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),true) < 0 ) {
                        // this address is already known ... linking
-                       strcpy(buf,"AT+LINK=");
-                       if (sendHC05AtCmd(strcat(buf,detected_address[k]),false) < 0 ) break;     //link sucess
+                       strncpy(buf,"LINK=",BT_BUFFER_SIZE);
+                       if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),false) < 0 ) break;     //link sucess
                      }
                    }
                  
                    // Then try to pair to listed devices
                    for ( int k = 0 ; k < detected_addressN ; k++ ) {
-                     strcpy(buf,"AT+FSAD=");
-                     if ( sendHC05AtCmd(strcat(buf,detected_address[k]),true) == COD_FAIL ) {
-                       strcpy(buf,"AT+PAIR=");
-                       strcat(buf,detected_address[k]);
-                       strcat(buf,",20");
+                     strncpy(buf,"FSAD=",BT_BUFFER_SIZE);
+                     if ( sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),true) == COD_FAIL ) {
+                       strncpy(buf,"PAIR=",BT_BUFFER_SIZE);
+                       strnncat(buf,detected_address[k],BT_BUFFER_SIZE - 6);
+                       strncat(buf,",20",BT_BUFFER_SIZE - 14 - 6);
                        if (sendHC05AtCmd(buf,false) < 0 ) {
                             // pairing  sucess
-                            strcpy(buf,"AT+LINK=");
-                            if (sendHC05AtCmd(strcat(buf,detected_address[k]),false) < 0 ) {
+                            strncpy(buf,"LINK=",BT_BUFFER_SIZE);
+                            if (sendHC05AtCmd(strncat(buf,detected_address[k],BT_BUFFER_SIZE - 6),false) < 0 ) {
                               forceHC05State(ST_CONNECTED);
                               break;     //link sucess
                             }
@@ -185,9 +186,9 @@ boolean Disk91_hc05::connect()
            print_debug("HC05 is inquiering - invalid state");
            // reset
            forceHC05State(ST_NOFORCE);               // Stop Slave inquiering ... reinit
-           sendHC05AtCmd("AT+RESET", true);          // Reset
+           sendHC05AtCmd("RESET", true);          // Reset
            delay(5000);
-           sendHC05AtCmd("AT+INIT",true);            // Init SPP
+           sendHC05AtCmd("INIT",true);            // Init SPP
            delay(2000);
            break;
           
@@ -195,13 +196,13 @@ boolean Disk91_hc05::connect()
            print_debug("HC05 is paired to a device");
            if ( getHC05Mrad() ) {
                // Connect to the last device if possible
-               strcpy(buf,"AT+LINK=");
-               if (sendHC05AtCmd(strcat(buf,detected_address[0]),false) < 0 ) {
+               strncpy(buf,"LINK=",BT_BUFFER_SIZE);
+               if (sendHC05AtCmd(strncat(buf,detected_address[0],BT_BUFFER_SIZE - 6),false) < 0 ) {
                  forceHC05State(ST_CONNECTED);
                }
                else {
 		 // If connection not succeed, back to standard process ...
-                 sendHC05AtCmd("AT",true); // it seems that after a AT+LINK the next AT command is not concidered
+                 sendHC05AtCmd(" ",true); // it seems that after a AT+LINK the next AT command is not concidered
                 
                  // When connection fail, if at bootup, we start a new pairing process
                  if ( bootup ) {
@@ -215,9 +216,9 @@ boolean Disk91_hc05::connect()
             
       case ST_DISCONNECTED:
            print_debug("Disconnection detected");
-           sendHC05AtCmd("AT+RESET", true);          // If not in state initialized : reset
+           sendHC05AtCmd("RESET", true);          // If not in state initialized : reset
            delay(5000);
-           sendHC05AtCmd("AT+INIT",true);            // Init SPP
+           sendHC05AtCmd("INIT",true);            // Init SPP
            delay(2000);
            break;
 
@@ -240,7 +241,7 @@ boolean Disk91_hc05::connect()
  * return -1 when the connection is broken
  * ---------------------------------------------------------------
  */
-int Disk91_hc05::receive(char * buf, int maxsz) 
+int HC05c::receive(char * buf, int maxsz) 
 {
     int bufd;
     if ( getHC05State() != ST_CONNECTED )
@@ -266,7 +267,7 @@ int Disk91_hc05::receive(char * buf, int maxsz)
  * return false if disconnected
  * ---------------------------------------------------------------
  */
-boolean Disk91_hc05::send(char * buf) 
+boolean HC05c::send(char * buf) 
 {
     if ( getHC05State() == ST_CONNECTED ) 
        blueToothSerial.print(buf);
@@ -287,7 +288,7 @@ boolean Disk91_hc05::send(char * buf)
  * it seems that testing multiple time the same rate ensure to have a better detection
  * return true is found, false otherwise.
  */
-boolean Disk91_hc05::getHC05Connection() {
+boolean HC05c::getHC05Connection() {
   int numRates = sizeof(rates)/sizeof(unsigned long);
   int recvd = 0;
   char _buffer[128];
@@ -316,7 +317,7 @@ boolean Disk91_hc05::getHC05Connection() {
  * this forced state is back to ST_ERROR
  */
 
-void Disk91_hc05::forceHC05State(int state) {
+void HC05c::forceHC05State(int state) {
    forcedState=state;
 }
 
@@ -326,7 +327,7 @@ void Disk91_hc05::forceHC05State(int state) {
  *  4 : INQUIRING        5 : CONNECTING   6 : CONNECTED   7 : DISCONNECTED
  *  8 : NUKNOW
  */
-int Disk91_hc05::getHC05State() {
+int HC05c::getHC05State() {
   int recvd = 0;
   char _buffer[128];
   int _bufsize = sizeof(_buffer)/sizeof(char);
@@ -370,18 +371,18 @@ int Disk91_hc05::getHC05State() {
  * timeout is set
  * return number of results
  */
-int Disk91_hc05::startHC05Inq(int timeout ) {
+int HC05c::startHC05Inq(int timeout ) {
   int recvd = 0;
   char _buffer[512];
   int _bufsize = sizeof(_buffer)/sizeof(char);
 
    print_debug("Entering startHC05Inq()");
-   sprintf(_buffer,"AT+INQM=1,4,%d",timeout); // mode rssi, 4 device max, timeout*1.28s max
+   sprintf(_buffer,"INQM=1,4,%d",timeout); // mode rssi, 4 device max, timeout*1.28s max
    sendHC05AtCmd(_buffer,true);
    blueToothSerial.print("AT+INQ\r\n");           // start INQ                     
    delay(1300*timeout);
    recvd = blueToothSerial.readBytes(_buffer,_bufsize);
-   sendHC05AtCmd("AT+INQC",true);                  // Retour etat INITIALIZED
+   sendHC05AtCmd("INQC",true);                  // Retour etat INITIALIZED
    blueToothSerial.flush();
    // Search for addresses in format : +INQ:aaaa:aa:aaaa,ttttt,ppppp 
    detected_addressN = 0;
@@ -421,7 +422,7 @@ int Disk91_hc05::startHC05Inq(int timeout ) {
 /* --- Get MRAD - Most Recent Used Address
  * return it in detected_Address[0], empty this table if not failed
  */
- boolean Disk91_hc05::getHC05Mrad() {
+ boolean HC05c::getHC05Mrad() {
    int recvd = 0;
    char _buffer[128];
    int _bufsize = sizeof(_buffer)/sizeof(char);
@@ -465,7 +466,7 @@ int Disk91_hc05::startHC05Inq(int timeout ) {
  * return the number from response format : +ADCN:X where X is the value on 1 or 2 digit
  * return -1 when error
  */
-int Disk91_hc05::getHC05ADCN(){
+int HC05c::getHC05ADCN(){
   int recvd = 0;
   char _buffer[128];
   int _bufsize = sizeof(_buffer)/sizeof(char);
@@ -503,7 +504,7 @@ int Disk91_hc05::getHC05ADCN(){
  * 24 - Invalid inq mode     25 - Too long inq time   26 - No BT addresse       27 - Invalid safe mode
  * 28 - Invalid encryptmode  30 - FAIL
  */
-int Disk91_hc05::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
+int HC05c::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
   int recvd = 0;
   char _buffer[128];
   int _bufsize = sizeof(_buffer)/sizeof(char);
@@ -512,6 +513,7 @@ int Disk91_hc05::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
    print_debug("Entering sendHC05AtCmd()");
    
    print_debug2(" * Send : ",atcmdstr);
+   blueToothSerial.print("AT+");
    blueToothSerial.print(atcmdstr);
    blueToothSerial.print("\r\n"); 
    delay(200);
@@ -551,7 +553,7 @@ int Disk91_hc05::sendHC05AtCmd(char * atcmdstr, boolean imediate) {
  * Remote address is transmitted with ':' separator, it is converted to ',' in the function
  * AT+RNAME?34C0,59,F191D5
  */
-void Disk91_hc05::getHC05RName(char * raddr) {
+void HC05c::getHC05RName(char * raddr) {
 #ifdef DEBUG
   int recvd = 0;
   char _buffer[128];

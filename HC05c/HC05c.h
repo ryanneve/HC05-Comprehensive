@@ -22,8 +22,8 @@
  * **********************************************************
  */
 #include "Arduino.h" 
-#ifndef DISK91_HC05
-#define DISK91_HC05
+#ifndef _HC05C_H_
+#define _HC05C_H_
 
 #define DEBUG
 
@@ -76,7 +76,7 @@
 #define BUFSZ 50
 
  
- class Disk91_hc05
+ class HC05c
  {
    public:
 
@@ -84,7 +84,7 @@
         * Construction
         * -------------------------------------------------------------
         */
-       Disk91_hc05();
+       HC05c();
 
        /* -------------------------------------------------------------
         * Configure the bluetooth device
